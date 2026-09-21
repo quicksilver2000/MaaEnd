@@ -1,0 +1,85 @@
+# MaaEnd 纯 Web 控制镜像（ARM / x86_64 通用）
+#
+# 用社区项目 MWU（https://github.com/ravizhan/MWU，Vue3 + FastAPI 的 MaaFramework 通用 WebUI）
+# 替代桌面版 MXU：
+#   - MWU 官方发布了 linux-aarch64 构建，弥补了 MXU 只有 linux-x86_64 的短板；
+#   - MWU 本身就是浏览器控制的 Web 应用（uvicorn 监听 0.0.0.0:5566），容器内无需
+#     Xvfb/VNC 之类的虚拟屏幕方案，镜像更小、启动更快。
+#
+# 组装方式：下载 MaaEnd 自己的 linux release（取 agent/ interface.json resource*，
+# 丢弃 maafw/ 与 MXU 主程序）覆盖到 MWU 的官方 release（自带 Nuitka 打包的 MaaFramework
+# 运行时）之上。
+#
+# ⚠️ 已知风险（社区项目，非 MaaEnd/MaaFramework 官方维护）：
+#   - MWU 自带的 MaaFramework 版本由其自身发布时锁定，可能与 MaaEnd 发布时锁定的版本不同，
+#     理论上存在协议/ABI 不完全一致的风险；如遇任务无法正常运行，可尝试改用固定的
+#     MWU_VERSION 而非 latest，或反馈给对应项目。
+#   - MWU 项目 README 中标注"尚未 Production-Ready"，请自行评估稳定性。
+FROM ubuntu:24.04
+
+ARG MAAEND_REPO=quicksilver2000/MaaEnd
+ARG MAAEND_VERSION=latest
+ARG MWU_REPO=ravizhan/MWU
+ARG MWU_VERSION=latest
+ARG TARGETARCH
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    APP_DIR=/app
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates curl tar p7zip-full dumb-init \
+        android-tools-adb libgomp1; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    case "$TARGETARCH" in \
+        amd64) MAA_ARCH=x86_64 ;; \
+        arm64) MAA_ARCH=aarch64 ;; \
+        *) echo "unsupported arch: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p "$APP_DIR"; \
+    # 1) 下载 MaaEnd release，取 agent/ interface.json resource*（MaaFramework 运行时改用 MWU 自带的）
+    if [ "$MAAEND_VERSION" = "latest" ]; then \
+        maaend_url=$(curl -fsSL "https://api.github.com/repos/${MAAEND_REPO}/releases/latest" \
+            | grep -oE '"browser_download_url": *"[^"]*MaaEnd-linux-'"${MAA_ARCH}"'-[^"]*\.tar\.gz"' \
+            | head -n1 | sed -E 's/.*"(https[^"]+)"/\1/'); \
+    else \
+        maaend_url="https://github.com/${MAAEND_REPO}/releases/download/${MAAEND_VERSION}/MaaEnd-linux-${MAA_ARCH}-${MAAEND_VERSION}.tar.gz"; \
+    fi; \
+    if [ -z "$maaend_url" ]; then \
+        echo "Failed to resolve MaaEnd linux-${MAA_ARCH} release asset url" >&2; exit 1; \
+    fi; \
+    echo "Downloading $maaend_url"; \
+    curl -fL "$maaend_url" -o /tmp/maaend.tar.gz; \
+    tar -xzf /tmp/maaend.tar.gz -C "$APP_DIR"; \
+    rm -f /tmp/maaend.tar.gz; \
+    rm -rf "$APP_DIR/maafw" "$APP_DIR/MaaEnd"; \
+    chmod +x "$APP_DIR/agent/go-service"; \
+    [ -f "$APP_DIR/agent/cpp-algo" ] && chmod +x "$APP_DIR/agent/cpp-algo" || true; \
+    # 2) 下载 MWU release（自带 MaaFramework 运行时的 Web 前后端），覆盖到同一目录
+    if [ "$MWU_VERSION" = "latest" ]; then \
+        mwu_url=$(curl -fsSL "https://api.github.com/repos/${MWU_REPO}/releases/latest" \
+            | grep -oE '"browser_download_url": *"[^"]*MWU-linux-'"${MAA_ARCH}"'-[^"]*\.7z"' \
+            | head -n1 | sed -E 's/.*"(https[^"]+)"/\1/'); \
+    else \
+        mwu_url="https://github.com/${MWU_REPO}/releases/download/${MWU_VERSION}/MWU-linux-${MAA_ARCH}-${MWU_VERSION}.7z"; \
+    fi; \
+    if [ -z "$mwu_url" ]; then \
+        echo "Failed to resolve MWU linux-${MAA_ARCH} release asset url" >&2; exit 1; \
+    fi; \
+    echo "Downloading $mwu_url"; \
+    curl -fL "$mwu_url" -o /tmp/mwu.7z; \
+    7z x /tmp/mwu.7z -o"$APP_DIR" -y >/dev/null; \
+    rm -f /tmp/mwu.7z; \
+    chmod +x "$APP_DIR/MWU"
+
+# MWU 内部固定监听 0.0.0.0:5566（main.py 里 uvicorn.run 写死），无需额外参数
+EXPOSE 5566
+
+WORKDIR /app
+
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["./MWU"]

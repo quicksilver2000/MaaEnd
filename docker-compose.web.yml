@@ -1,0 +1,14 @@
+services:
+  maaend:
+    # 替换为你 fork 仓库对应的 GHCR 镜像地址（小写），注意 tag 用 web / web-<版本号>
+    # 例如 ghcr.io/quicksilver2000/maaend:web
+    image: ghcr.io/quicksilver2000/maaend:web
+    container_name: maaend
+    restart: unless-stopped
+    # 桥接网络即可：容器访问局域网内安卓 Pad 的 ADB 端口属于出站连接
+    ports:
+      - "5566:5566" # MWU 网页端口，浏览器打开 http://<NAS-IP>:5566 配置/操作
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - ./config:/app/config # MWU 用户配置（设备、任务配置、定时任务等）
