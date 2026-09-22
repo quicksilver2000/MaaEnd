@@ -63,12 +63,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # 拉取上游 tag
+          # 拉取上游 tag（浅克隆，取 tag 指向的 commit）
           git remote add upstream "https://github.com/${up}.git"
           git fetch upstream "refs/tags/${tag}" --depth=1
-
-          # 以上游 tag 为基底创建本地分支
-          git checkout -B sync-upstream "refs/tags/${tag}"
+          # 浅克隆下 refs/tags/<tag> 可能只是 tag 对象，无法直接 checkout；
+          # 显式解引用 tag 到 commit 再创建分支。
+          git checkout -B sync-upstream "refs/tags/${tag}^{commit}"
 
           # 覆盖本 fork 对 CI/镜像的改动（这些文件在上游不存在或需保留 fork 版本）
           git checkout "${{ github.sha }}" -- \
