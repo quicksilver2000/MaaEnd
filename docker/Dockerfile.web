@@ -30,7 +30,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        ca-certificates curl tar p7zip-full dumb-init \
+        ca-certificates curl tar p7zip-full dumb-init python3 \
         android-tools-adb libgomp1 libatomic1; \
     rm -rf /var/lib/apt/lists/*
 
