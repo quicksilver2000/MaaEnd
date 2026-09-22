@@ -155,7 +155,10 @@ RUN set -eux; \
 # MWU 内部固定监听 0.0.0.0:5566（main.py 里 uvicorn.run 写死），无需额外参数
 EXPOSE 5566
 
+# 启动前初始化 config（缺 settings.json 时写入默认配置），再启动 MWU
+COPY docker/entrypoint-web.sh /entrypoint-web.sh
+RUN chmod +x /entrypoint-web.sh
+
 WORKDIR /app
 
-ENTRYPOINT ["dumb-init", "--"]
-CMD ["./MWU"]
+CMD ["/entrypoint-web.sh"]
