@@ -107,7 +107,11 @@ def strip_linux_controllers(data):
     if isinstance(data, dict):
         for k, v in data.items():
             if k == "controller" and isinstance(v, list):
-                data[k] = [x for x in v if x not in STRIP]
+                data[k] = [
+                    x for x in v
+                    if not (isinstance(x, str) and x in STRIP)
+                    and not (isinstance(x, dict) and x.get("type") == "Linux")
+                ]
             else:
                 strip_linux_controllers(v)
     elif isinstance(data, list):
