@@ -727,7 +727,11 @@ jobs:
         with:
           files: artifacts/*
           tag_name: ${{ needs.meta.outputs.tag }}
-          body: ${{ needs.changelog.outputs.release_body }}
+          # 用固定短 body，避免超长 changelog 作为进程参数触发 "Argument list too long"
+          # （fork 含上游全部历史 tag，git-cliff 生成的 changelog 可达数千行）
+          body: |
+            MaaEnd ${{ needs.meta.outputs.tag }} 自动构建产物。
+            （fork 分支构建，release notes 从简）
           draft: false
           prerelease: ${{ needs.meta.outputs.is_prerelease == 'true' }}
 
