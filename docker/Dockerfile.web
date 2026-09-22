@@ -64,11 +64,13 @@ RUN set -eux; \
     #   1) 从 interface.json 的 controller 列表中剔除 type 为 Linux 的条目；
     #   2) 同时剔除各任务 JSON controller 数组中对这些 Linux controller 的引用，
     #      否则 MWU 会报"任务引用了不存在的 controller"。
+    # 注意：MaaEnd release 把 assets/ 内容平铺到根目录，import 路径 tasks/xxx.json
+    #      相对软件根目录解析，因此任务文件在 $APP_DIR/tasks/ 而非 $APP_DIR/assets/tasks/。
     if [ -f "$APP_DIR/interface.json" ]; then \
         jq 'if (.controller | type) == "array" then .controller = [.controller[] | select(.type != "Linux")] else . end' \
             "$APP_DIR/interface.json" > "$APP_DIR/interface.json.tmp" && mv "$APP_DIR/interface.json.tmp" "$APP_DIR/interface.json"; \
     fi; \
-    find "$APP_DIR/assets/tasks" -type f -name '*.json' | while read -r tf; do \
+    find "$APP_DIR/tasks" -type f -name '*.json' 2>/dev/null | while read -r tf; do \
         jq 'if (.task | type) == "array" then .task = [.task[] | if (.controller | type) == "array" then .controller = [.controller[] | select(. != "Linux-Gamescope" and . != "Linux-ScreenCast" and . != "Linux-Wlroots")] else . end] else . end' \
             "$tf" > "$tf.tmp" && mv "$tf.tmp" "$tf"; \
     done; \
