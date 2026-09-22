@@ -672,6 +672,11 @@ jobs:
     if: ${{ needs.meta.outputs.is_release == 'true' }}
     needs: [meta, package_linux_tarball, package_macos_dmg, package_win_zip, changelog]
     runs-on: ubuntu-latest
+    # fork 上默认 GITHUB_TOKEN 只有 contents: read，无法创建 Release；
+    # 这里显式授予 contents: write（softprops/action-gh-release 需要）
+    permissions:
+      contents: write
+      actions: write
     steps:
       - uses: actions/download-artifact@v7
         with:
