@@ -1,0 +1,91 @@
+name: sync-upstream
+
+# 自动同步上游 MaaEnd 的新 Release 到本 fork，并触发镜像构建。
+#
+# 背景：GitHub 的 fork 不会自动接收上游 release 事件，也没有内置 fork 同步。
+# 本 workflow 通过定时轮询上游 release，发现新版本后：
+#   1. 以上游 tag 的代码为基底（checkout 上游 tag）；
+#   2. 把本 fork 对 CI/镜像的改动（docker/、docker-compose*、install.yml、docker.yml 的修复）
+#      覆盖上去，提交为一个新提交；
+#   3. 打与上游相同的 tag 并推送（触发 install.yml → 发布 fork Release → 触发 docker.yml 构建镜像）。
+#
+# 触发方式：
+#   - schedule：每 30 分钟检查一次（可改 cron）
+#   - workflow_dispatch：手动触发，立即检查
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for new upstream release
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          # 上游仓库 = fork 的 parent（通过 API 获取，避免硬编码）
+          upstream=$(gh api "/repos/$repo" --jq '.parent.full_name' 2>/dev/null || echo "MaaEnd/MaaEnd")
+          echo "upstream=$upstream"
+          up_tag=$(gh release view --repo "$upstream" --json tagName -q .tagName)
+          echo "upstream latest tag: $up_tag"
+          if gh release view --repo "$repo" --tag "$up_tag" >/dev/null 2>&1; then
+            echo "tag $up_tag already released on fork, nothing to do"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "tag=$up_tag" | tee -a "$GITHUB_OUTPUT"
+          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Build fork image tag from upstream tag
+        if: steps.check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          up="${{ steps.check.outputs.upstream }}"
+          tag="${{ steps.check.outputs.tag }}"
+          repo="${{ github.repository }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 拉取上游 tag（完整拉取，确保拿到 tag 及其指向的 commit）
+          git remote add upstream "https://github.com/${up}.git"
+          git fetch upstream tag "$tag"
+          # 显式解引用 tag 到 commit 再创建分支，避免 annotated tag 对象无法直接 checkout
+          git checkout -B sync-upstream "refs/tags/${tag}^{commit}"
+
+          # 覆盖本 fork 对 CI/镜像的改动（这些文件在上游不存在或需保留 fork 版本）
+          git checkout "${{ github.sha }}" -- \
+            docker/ \
+            docker-compose.yml \
+            docker-compose.web.yml \
+            .github/workflows/install.yml \
+            .github/workflows/docker.yml \
+            .github/workflows/sync-upstream.yml || true
+
+          git add -A
+          # 若上游 tag 与 fork 改动内容完全一致则无新提交，用 --allow-empty 兜底
+          git commit --allow-empty -m "sync upstream ${tag}, apply fork docker/CI changes" || true
+
+          # 打与上游相同的 tag 指向该提交
+          git tag -f "$tag"
+
+          # 推送 tag（触发 install.yml）。v2 分支不强制推，避免覆盖 fork 分支结构。
+          git push origin "refs/tags/${tag}" --force
+
+          echo "pushed tag $tag"

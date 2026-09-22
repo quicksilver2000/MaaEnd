@@ -1,0 +1,23 @@
+services:
+  maaend:
+    # 替换为你 fork 仓库对应的 GHCR 镜像地址（小写），例如 ghcr.io/quicksilver2000/maaend:latest
+    image: ghcr.io/quicksilver2000/maaend:latest
+    container_name: maaend
+    restart: unless-stopped
+    # 默认桥接网络即可：容器访问局域网内安卓 Pad 的 ADB 端口属于出站连接，桥接网络下 Docker 的 NAT
+    # 已允许访问局域网设备，无需 host 网络。若你的 Pad 与 NAS 之间有额外的网络隔离/防火墙限制，
+    # 或希望容器直接暴露在局域网（无端口映射），可自行改成 network_mode: host。
+    ports:
+      - "6080:6080" # noVNC 网页端口，浏览器打开 http://<NAS-IP>:6080/vnc.html 配置/操作 MXU
+    environment:
+      TZ: Asia/Shanghai
+      # 建议设置访问密码，避免局域网内任意设备直接控制你的 MXU
+      VNC_PASSWORD: ""
+      DISPLAY_RESOLUTION: "1280x720x24"
+    volumes:
+      - ./config:/app/config # MXU 用户配置（实例、任务列表、定时任务等）
+      - ./debug:/app/debug # MXU 调试日志
+    # webkit2gtk 渲染需要较大的共享内存，默认 64MB 容易崩溃
+    shm_size: "1gb"
+    # 容器内已内置 adb（android-tools-adb），无需在 NAS 上额外安装；
+    # 首次使用可 exec 进容器自检：docker exec -it maaend adb version
