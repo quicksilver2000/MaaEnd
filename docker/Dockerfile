@@ -57,7 +57,7 @@ RUN set -eux; \
     find "$APP_DIR/maafw" -type f -name "Maa*" ! -name "*.so" -exec chmod +x {} \; ; \
     [ -f "$APP_DIR/agent/cpp-algo" ] && chmod +x "$APP_DIR/agent/cpp-algo" || true
 
-COPY entrypoint.sh /entrypoint.sh
+COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # noVNC 网页端口；容器内部真实 VNC 端口固定 5900（供本机调试用，一般无需单独暴露）
