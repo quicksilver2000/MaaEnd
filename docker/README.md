@@ -43,11 +43,14 @@ ghcr.io/quicksilver2000/maaend:web-<tag>
 
 > 首次使用请确认 fork 仓库的 Actions 已启用，且 GHCR 镜像默认设为 **Public**（Settings -> Packages），否则 NAS 拉取镜像时需要先 `docker login ghcr.io`。
 
+> 镜像 tag 说明：`latest` / `web` 是「始终跟随最新 Release」的滚动标签；`<tag>` / `web-<tag>` 是固定版本标签（如 `v1.0.0-nas2`）。生产建议固定到具体版本，避免升级后行为变化。
+
 ## 2. NAS 上部署
 
 1. 在安卓 Pad 上开启 ADB 网络调试：
    - 安卓 11+：设置 -> 开发者选项 -> 无线调试，记下 `IP:端口`。
    - 或用数据线执行一次 `adb tcpip 5555`，之后即可断开数据线，用 `IP:5555` 连接。
+   - 注意：Pad 的 IP 若会变（DHCP），建议在路由器给它绑定静态 IP，否则定时任务会因设备地址变化而失败。
 2. **x86_64 NAS（desktop）**：把仓库中的 [docker-compose.yml](../docker-compose.yml) 拷贝到 NAS 任意目录，按需修改：
    - `image`：改成你自己的 GHCR 镜像地址。
    - `VNC_PASSWORD`：建议设置，避免局域网内其他人访问你的 noVNC 页面。
@@ -63,6 +66,8 @@ ghcr.io/quicksilver2000/maaend:web-<tag>
    - desktop：`http://<NAS-IP>:6080/vnc.html`，进入 MXU 后新建实例，控制器选择 ADB，设备地址填 Pad 的 `IP:端口`（首次连接会自动 `adb connect`）；配置资源路径为镜像内已内置的 `resource`/`interface.json`；按需勾选任务、配置定时任务。
    - web：`http://<NAS-IP>:5566`，进入 MWU 后同样先连接 ADB 设备，再勾选任务、配置定时任务。
 
+> 容器内已内置 `adb`（`android-tools-adb`），**NAS 上无需额外安装**。可自检：`docker exec -it maaend adb version`（web 版容器名默认 `maaend`）。
+
 ## 3. 数据持久化
 
 - `docker-compose.yml`（desktop）已挂载 `./config:/app/config`（MXU 实例配置、任务列表、定时任务）与 `./debug:/app/debug`（MXU 调试日志）。
@@ -72,7 +77,9 @@ ghcr.io/quicksilver2000/maaend:web-<tag>
 
 ## 常见问题
 
-- **ADB 连不上**：确认 NAS 与 Pad 在同一局域网、Pad 无线调试已开启且 IP 未变化；必要时先用数据线 `adb tcpip 5555` 固化一次 TCP 模式。
+- **ADB 连不上**：确认 NAS 与 Pad 在同一局域网、Pad 无线调试已开启且 IP 未变化；必要时先用数据线 `adb tcpip 5555` 固化一次 TCP 模式。可在容器内手动连一次排障：`docker exec -it maaend adb connect <Pad-IP>:<端口>`。
 - **（desktop）画面卡顿/无法渲染**：确认 `shm_size` 至少 `1gb`（webkit2gtk 对共享内存较敏感）。
 - **（web）任务执行异常/疑似协议不兼容**：MWU 自带的 MaaFramework 运行时版本独立于 MaaEnd 锁定，构建镜像时可通过 `MWU_VERSION` build-arg 固定到某个已验证可用的版本再重新构建。
-- **想要更低延迟/更简单的网络**：可将 `network_mode` 改为 `host`（去掉 `ports` 段），前提是 NAS 的 Docker 支持 host 网络模式。
+- **（web）健康检查**：`docker-compose.web.yml` 已内置 healthcheck（curl 探测 `:5566`），可用 `docker inspect --format '{{.State.Health.Status}}' maaend` 查看；未就绪时 `restart: unless-stopped` 不会反复重启。
+- **想要更低延迟/更简单的网络**：可将 `network_mode` 改为 `host`（去掉 `ports` 段），前提是 NAS 的 Docker 支持 host 网络模式。注意 host 模式下 desktop 的 noVNC 仍走 6080、web 走 5566。
+- **升级镜像**：`docker compose pull && docker compose up -d`，配置卷（`./config`、`./debug`）不受影响。建议在升级前备份 `./config` 目录。

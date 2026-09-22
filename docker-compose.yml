@@ -19,3 +19,5 @@ services:
       - ./debug:/app/debug # MXU 调试日志
     # webkit2gtk 渲染需要较大的共享内存，默认 64MB 容易崩溃
     shm_size: "1gb"
+    # 容器内已内置 adb（android-tools-adb），无需在 NAS 上额外安装；
+    # 首次使用可 exec 进容器自检：docker exec -it maaend adb version
