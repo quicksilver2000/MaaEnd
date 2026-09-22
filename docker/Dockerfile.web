@@ -30,7 +30,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        ca-certificates curl tar p7zip-full dumb-init \
+        ca-certificates curl tar p7zip-full dumb-init jq \
         android-tools-adb libgomp1 libatomic1; \
     rm -rf /var/lib/apt/lists/*
 
@@ -59,6 +59,12 @@ RUN set -eux; \
     rm -rf "$APP_DIR/maafw" "$APP_DIR/MaaEnd"; \
     chmod +x "$APP_DIR/agent/go-service"; \
     [ -f "$APP_DIR/agent/cpp-algo" ] && chmod +x "$APP_DIR/agent/cpp-algo" || true; \
+    # MWU 的 pydantic 模型不识别 type: "Linux" 的 controller（仅 Adb/Win32/MacOS/PlayCover/WlRoots/Gamepad），
+    # 且 NAS 上用 MWU + ADB 连接 Pad 也用不到桌面 Linux 控制器，故从 interface.json 中剔除。
+    if [ -f "$APP_DIR/interface.json" ]; then \
+        jq 'if (.controller | type) == "array" then .controller = [.controller[] | select(.type != "Linux")] else . end' \
+            "$APP_DIR/interface.json" > "$APP_DIR/interface.json.tmp" && mv "$APP_DIR/interface.json.tmp" "$APP_DIR/interface.json"; \
+    fi; \
     # 2) 下载 MWU release（自带 MaaFramework 运行时的 Web 前后端），覆盖到同一目录
     if [ "$MWU_VERSION" = "latest" ]; then \
         mwu_url=$(curl -fsSL "https://api.github.com/repos/${MWU_REPO}/releases/latest" \
