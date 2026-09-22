@@ -60,11 +60,18 @@ RUN set -eux; \
     chmod +x "$APP_DIR/agent/go-service"; \
     [ -f "$APP_DIR/agent/cpp-algo" ] && chmod +x "$APP_DIR/agent/cpp-algo" || true; \
     # MWU 的 pydantic 模型不识别 type: "Linux" 的 controller（仅 Adb/Win32/MacOS/PlayCover/WlRoots/Gamepad），
-    # 且 NAS 上用 MWU + ADB 连接 Pad 也用不到桌面 Linux 控制器，故从 interface.json 中剔除。
+    # 且 NAS 上用 MWU + ADB 连接 Pad 也用不到桌面 Linux 控制器，故：
+    #   1) 从 interface.json 的 controller 列表中剔除 type 为 Linux 的条目；
+    #   2) 同时剔除各任务 JSON controller 数组中对这些 Linux controller 的引用，
+    #      否则 MWU 会报"任务引用了不存在的 controller"。
     if [ -f "$APP_DIR/interface.json" ]; then \
         jq 'if (.controller | type) == "array" then .controller = [.controller[] | select(.type != "Linux")] else . end' \
             "$APP_DIR/interface.json" > "$APP_DIR/interface.json.tmp" && mv "$APP_DIR/interface.json.tmp" "$APP_DIR/interface.json"; \
     fi; \
+    find "$APP_DIR/assets/tasks" -type f -name '*.json' | while read -r tf; do \
+        jq 'if (.task | type) == "array" then .task = [.task[] | if (.controller | type) == "array" then .controller = [.controller[] | select(. != "Linux-Gamescope" and . != "Linux-ScreenCast" and . != "Linux-Wlroots")] else . end] else . end' \
+            "$tf" > "$tf.tmp" && mv "$tf.tmp" "$tf"; \
+    done; \
     # 2) 下载 MWU release（自带 MaaFramework 运行时的 Web 前后端），覆盖到同一目录
     if [ "$MWU_VERSION" = "latest" ]; then \
         mwu_url=$(curl -fsSL "https://api.github.com/repos/${MWU_REPO}/releases/latest" \
