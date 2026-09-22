@@ -28,6 +28,7 @@ jobs:
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       image: ${{ steps.meta.outputs.image }}
+      mwu_version: ${{ steps.meta.outputs.mwu_version }}
     steps:
       - name: Resolve image metadata
         id: meta
@@ -41,6 +42,9 @@ jobs:
           owner_lower=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           echo "tag=$tag" | tee -a "$GITHUB_OUTPUT"
           echo "image=ghcr.io/${owner_lower}/maaend" | tee -a "$GITHUB_OUTPUT"
+          # 在 workflow 内（有 GITHUB_TOKEN）解析 MWU 最新版本，避免容器内无认证的 GitHub API 调用被限流（403）
+          mwu_version=$(gh release view --repo ravizhan/MWU --json tagName -q .tagName)
+          echo "mwu_version=$mwu_version" | tee -a "$GITHUB_OUTPUT"
 
   build-and-push-desktop:
     needs: meta
@@ -103,6 +107,8 @@ jobs:
           build-args: |
             MAAEND_REPO=${{ github.repository }}
             MAAEND_VERSION=${{ needs.meta.outputs.tag }}
+            MWU_REPO=ravizhan/MWU
+            MWU_VERSION=${{ needs.meta.outputs.mwu_version }}
           tags: |
             ${{ needs.meta.outputs.image }}:web
             ${{ needs.meta.outputs.image }}:web-${{ needs.meta.outputs.tag }}
