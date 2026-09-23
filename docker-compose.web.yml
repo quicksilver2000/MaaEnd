@@ -1,3 +1,8 @@
+# ⚠️ 界面说明：本镜像（web / MWU）的网页界面与桌面端（MXU）不同。
+#   - desktop 镜像（tag: latest）用 noVNC 转发 MXU 桌面 GUI，界面与桌面版完全一致；
+#   - 但 MXU 只有 linux/x86_64 版，ARM NAS 无法运行 desktop 镜像。
+#   - 本 web 镜像用社区项目 MWU（Vue3 + FastAPI 通用 WebUI），是 ARM NAS 唯一可用的纯 Web 方案，
+#     界面为 MWU 自研，与 MaaEnd 桌面端不同，但功能等价（连接设备、选任务、定时任务等）。
 services:
   maaend:
     # 替换为你 fork 仓库对应的 GHCR 镜像地址（小写），注意 tag 用 web / web-<版本号>
