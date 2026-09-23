@@ -41,8 +41,11 @@ jobs:
           echo "upstream=$upstream"
           up_tag=$(gh release view --repo "$upstream" --json tagName -q .tagName)
           echo "upstream latest tag: $up_tag"
-          if gh release view --repo "$repo" --tag "$up_tag" >/dev/null 2>&1; then
-            echo "tag $up_tag already released on fork, nothing to do"
+          # 若 fork 上已存在同名 tag（无论是否已发布为 GitHub Release），说明已同步过，跳过。
+          # 注意不能用 gh release view 判断——同步创建的是普通 tag 而非 Release，
+          # 用 release 判断会误判"未同步"而反复重试（且 push 已存在 tag 会被拒绝）。
+          if gh api "repos/$repo/git/refs/tags/$up_tag" >/dev/null 2>&1; then
+            echo "tag $up_tag already exists on fork, nothing to do"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
