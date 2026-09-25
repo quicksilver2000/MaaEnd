@@ -1,0 +1,28 @@
+# ⚠️ 界面说明：本镜像（web / MWU）的网页界面与桌面端（MXU）不同。
+#   - desktop 镜像（tag: latest）用 noVNC 转发 MXU 桌面 GUI，界面与桌面版完全一致；
+#   - 但 MXU 只有 linux/x86_64 版，ARM NAS 无法运行 desktop 镜像。
+#   - 本 web 镜像用社区项目 MWU（Vue3 + FastAPI 通用 WebUI），是 ARM NAS 唯一可用的纯 Web 方案，
+#     界面为 MWU 自研，与 MaaEnd 桌面端不同，但功能等价（连接设备、选任务、定时任务等）。
+services:
+  maaend:
+    # 替换为你 fork 仓库对应的 GHCR 镜像地址（小写），注意 tag 用 web / web-<版本号>
+    # 例如 ghcr.io/quicksilver2000/maaend:web
+    image: ghcr.io/quicksilver2000/maaend:web
+    container_name: maaend
+    restart: unless-stopped
+    # 桥接网络即可：容器访问局域网内安卓 Pad 的 ADB 端口属于出站连接，
+    # 无需 host 网络。若 Pad 与 NAS 间有额外网络隔离，可改用 network_mode: host。
+    ports:
+      - "5566:5566" # MWU 网页端口，浏览器打开 http://<NAS-IP>:5566 配置/操作
+    environment:
+      TZ: Asia/Shanghai
+    # MWU 基于图像识别/OpenCV，需要一定共享内存；默认 64MB 偏小，建议调大
+    shm_size: "512mb"
+    volumes:
+      - ./config:/app/config # MWU 用户配置（设备、任务配置、定时任务等）
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5566/ >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s

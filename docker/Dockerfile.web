@@ -1,0 +1,164 @@
+# MaaEnd 纯 Web 控制镜像（ARM / x86_64 通用）
+#
+# 用社区项目 MWU（https://github.com/ravizhan/MWU，Vue3 + FastAPI 的 MaaFramework 通用 WebUI）
+# 替代桌面版 MXU：
+#   - MWU 官方发布了 linux-aarch64 构建，弥补了 MXU 只有 linux-x86_64 的短板；
+#   - MWU 本身就是浏览器控制的 Web 应用（uvicorn 监听 0.0.0.0:5566），容器内无需
+#     Xvfb/VNC 之类的虚拟屏幕方案，镜像更小、启动更快。
+#
+# 组装方式：下载 MaaEnd 自己的 linux release（取 agent/ interface.json resource*，
+# 丢弃 maafw/ 与 MXU 主程序）覆盖到 MWU 的官方 release（自带 Nuitka 打包的 MaaFramework
+# 运行时）之上。
+#
+# ⚠️ 已知风险（社区项目，非 MaaEnd/MaaFramework 官方维护）：
+#   - MWU 自带的 MaaFramework 版本由其自身发布时锁定，可能与 MaaEnd 发布时锁定的版本不同，
+#     理论上存在协议/ABI 不完全一致的风险；如遇任务无法正常运行，可尝试改用固定的
+#     MWU_VERSION 而非 latest，或反馈给对应项目。
+#   - MWU 项目 README 中标注"尚未 Production-Ready"，请自行评估稳定性。
+FROM ubuntu:24.04
+
+ARG MAAEND_REPO=quicksilver2000/MaaEnd
+ARG MAAEND_VERSION=latest
+ARG MWU_REPO=ravizhan/MWU
+ARG MWU_VERSION=latest
+ARG TARGETARCH
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    APP_DIR=/app
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates curl tar p7zip-full dumb-init python3 \
+        android-tools-adb libgomp1 libatomic1; \
+    rm -rf /var/lib/apt/lists/*
+
+# 1) 下载 MaaEnd release，取 agent/ interface.json resource*（MaaFramework 运行时改用 MWU 自带的）
+RUN set -eux; \
+    case "$TARGETARCH" in \
+        amd64) MAA_ARCH=x86_64 ;; \
+        arm64) MAA_ARCH=aarch64 ;; \
+        *) echo "unsupported arch: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    echo "$MAA_ARCH" > /tmp/maa_arch; \
+    mkdir -p "$APP_DIR"; \
+    if [ "$MAAEND_VERSION" = "latest" ]; then \
+        maaend_url=$(curl -fsSL "https://api.github.com/repos/${MAAEND_REPO}/releases/latest" \
+            | grep -oE '"browser_download_url": *"[^"]*MaaEnd-linux-'"${MAA_ARCH}"'-[^"]*\.tar\.gz"' \
+            | head -n1 | sed -E 's/.*"(https[^"]+)"/\1/'); \
+    else \
+        maaend_url="https://github.com/${MAAEND_REPO}/releases/download/${MAAEND_VERSION}/MaaEnd-linux-${MAA_ARCH}-${MAAEND_VERSION}.tar.gz"; \
+    fi; \
+    if [ -z "$maaend_url" ]; then \
+        echo "Failed to resolve MaaEnd linux-${MAA_ARCH} release asset url" >&2; exit 1; \
+    fi; \
+    echo "Downloading $maaend_url"; \
+    curl -fL "$maaend_url" -o /tmp/maaend.tar.gz; \
+    tar -xzf /tmp/maaend.tar.gz -C "$APP_DIR"; \
+    rm -f /tmp/maaend.tar.gz; \
+    rm -rf "$APP_DIR/maafw" "$APP_DIR/MaaEnd"; \
+    chmod +x "$APP_DIR/agent/go-service"; \
+    [ -f "$APP_DIR/agent/cpp-algo" ] && chmod +x "$APP_DIR/agent/cpp-algo" || true
+
+# MWU 的 pydantic 模型不识别 type: "Linux" 的 controller（仅 Adb/Win32/MacOS/PlayCover/WlRoots/Gamepad），
+# 且 NAS 上用 MWU + ADB 连接 Pad 也用不到桌面 Linux 控制器，故：
+#   1) 从 interface.json 的 controller 列表中剔除 type 为 Linux 的条目；
+#   2) 同时剔除各任务 JSON controller 数组中对这些 Linux controller 的引用，
+#      否则 MWU 会报"任务引用了不存在的 controller"。
+# 注意：MaaEnd release 把 assets/ 内容平铺到根目录，import 路径 tasks/xxx.json
+#      相对软件根目录解析，因此任务文件在 /app/tasks/ 而非 /app/assets/tasks/。
+# 任务 JSON 可能含 // 与 /* */ 注释，jq 无法解析，故用 python3（MWU 的 json_utils 亦支持注释）。
+# 注意：heredoc 必须独占一个 RUN，不能放在用 \ 续行的多行 RUN 内。
+RUN python3 - /app <<'PYEOF'
+import json, sys, glob
+
+ROOT = sys.argv[1]
+STRIP = {"Linux-Gamescope", "Linux-ScreenCast", "Linux-Wlroots"}
+
+def strip_comments(text):
+    out = []
+    i, n = 0, len(text)
+    in_str = False
+    while i < n:
+        c = text[i]
+        if in_str:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(text[i + 1]); i += 2; continue
+            if c == '"':
+                in_str = False
+            i += 1; continue
+        if c == '"':
+            in_str = True; out.append(c); i += 1; continue
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "*":
+            i += 2
+            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                i += 1
+            i += 2; continue
+        out.append(c); i += 1
+    return "".join(out)
+
+def strip_linux_controllers(data):
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if k == "controller" and isinstance(v, list):
+                data[k] = [
+                    x for x in v
+                    if not (isinstance(x, str) and x in STRIP)
+                    and not (isinstance(x, dict) and x.get("type") == "Linux")
+                ]
+            else:
+                strip_linux_controllers(v)
+    elif isinstance(data, list):
+        for item in data:
+            strip_linux_controllers(item)
+
+targets = [f"{ROOT}/interface.json"] + glob.glob(f"{ROOT}/tasks/**/*.json", recursive=True)
+for path in targets:
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = f.read()
+        data = json.loads(strip_comments(raw))
+        strip_linux_controllers(data)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        print(f"processed {path}")
+    except Exception as e:
+        print(f"WARN skip {path}: {e}")
+PYEOF
+
+# 2) 下载 MWU release（自带 MaaFramework 运行时的 Web 前后端），覆盖到同一目录
+RUN set -eux; \
+    MAA_ARCH=$(cat /tmp/maa_arch); \
+    if [ "$MWU_VERSION" = "latest" ]; then \
+        mwu_url=$(curl -fsSL "https://api.github.com/repos/${MWU_REPO}/releases/latest" \
+            | grep -oE '"browser_download_url": *"[^"]*MWU-linux-'"${MAA_ARCH}"'-[^"]*\.7z"' \
+            | head -n1 | sed -E 's/.*"(https[^"]+)"/\1/'); \
+    else \
+        mwu_url="https://github.com/${MWU_REPO}/releases/download/${MWU_VERSION}/MWU-linux-${MAA_ARCH}-${MWU_VERSION}.7z"; \
+    fi; \
+    if [ -z "$mwu_url" ]; then \
+        echo "Failed to resolve MWU linux-${MAA_ARCH} release asset url" >&2; exit 1; \
+    fi; \
+    echo "Downloading $mwu_url"; \
+    curl -fL "$mwu_url" -o /tmp/mwu.7z; \
+    7z x /tmp/mwu.7z -o"$APP_DIR" -y >/dev/null; \
+    rm -f /tmp/mwu.7z; \
+    chmod +x "$APP_DIR/MWU"
+
+# MWU 内部固定监听 0.0.0.0:5566（main.py 里 uvicorn.run 写死），无需额外参数
+EXPOSE 5566
+
+# 启动前初始化 config（缺 settings.json 时写入默认配置），再启动 MWU
+COPY docker/entrypoint-web.sh /entrypoint-web.sh
+RUN chmod +x /entrypoint-web.sh
+
+WORKDIR /app
+
+CMD ["/entrypoint-web.sh"]
