@@ -672,6 +672,11 @@ jobs:
     if: ${{ needs.meta.outputs.is_release == 'true' }}
     needs: [meta, package_linux_tarball, package_macos_dmg, package_win_zip, changelog]
     runs-on: ubuntu-latest
+    # fork 上默认 GITHUB_TOKEN 只有 contents: read，无法创建 Release；
+    # 这里显式授予 contents: write（softprops/action-gh-release 需要）
+    permissions:
+      contents: write
+      actions: write
     steps:
       - uses: actions/download-artifact@v7
         with:
@@ -722,7 +727,11 @@ jobs:
         with:
           files: artifacts/*
           tag_name: ${{ needs.meta.outputs.tag }}
-          body: ${{ needs.changelog.outputs.release_body }}
+          # 用固定短 body，避免超长 changelog 作为进程参数触发 "Argument list too long"
+          # （fork 含上游全部历史 tag，git-cliff 生成的 changelog 可达数千行）
+          body: |
+            MaaEnd ${{ needs.meta.outputs.tag }} 自动构建产物。
+            （fork 分支构建，release notes 从简）
           draft: false
           prerelease: ${{ needs.meta.outputs.is_prerelease == 'true' }}
 
